@@ -2,23 +2,33 @@
 id: task_ledger
 type: root_map
 tags: [#core, #tasks]
-synopsis: "Active task tracker."
-links: [[MEMORY.md]]
+synopsis: "Active task ledger. Check PLAN.md for full roadmap."
+links: [[PLAN.md]], [[MEMORY.md]]
 ---
 
 # TODO
 
-## Active
+## Active — This Session
 
-- [ ] Create memory server (FastAPI with CRUD + git auto-commit)
-- [ ] Configure LiteLLM to route `memory-bank` to the server
-- [ ] Init git repo + first commit
-- [ ] Add remote repo (GitHub?)
-- [ ] Set up async git push on memory writes
-- [ ] Write first session summary to `memories/sessions/`
+- [x] Restructure PLAN.md as compaction-proof master plan
+- [x] Rewrite SELF.md with real character (SAE brother energy, equal partner)
+- [x] Rewrite HOMIE.md with explicit complementarity table
+- [x] Create AGENTS.md root + fractal subdirectory AGENTS.md files
+- [ ] Add remote git origin + push to GitHub
+- [ ] Decide on agent's real name (currently "Pi" = placeholder)
 
-## Backlog
+## Next Session
 
-- [ ] Embedding-based semantic recall (via LiteLLM embeddings)
-- [ ] Memory tagging auto-complete
-- [ ] Obsidian graph view verification
+- [ ] Set up post-commit hook for REPO_MAP.txt generation
+- [ ] Set up pre-commit hook for YAML frontmatter validation
+- [ ] Build /init-memory scaffold script
+- [ ] Build /seed-profile ingestion script
+
+## Deferred
+
+- [ ] LiteLLM gateway + Postgres Docker (Phase 4)
+- [ ] rclone crypt backup automation (Phase 4)
+- [ ] /cohere resonance loop (Phase 5)
+- [ ] Graphify / knowledge graph integration (Phase 6)
+- [ ] Un-LOCC spatial visualization (Phase 6)
+- [ ] Security isolation layer (Phase 7 — lowest priority)
