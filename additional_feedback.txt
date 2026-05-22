@@ -1,0 +1,1878 @@
+1. add sqlite indexing
+2. self-evolving skills git tracked
+3. git as absolute source of truth. git as memory.
+4. llm-wiki
+5. self-improving agent, self-healing, resilient, autonomous
+6. do we nix docker postgresql container as future? use litellm proxy with sqlite backend? is LiteLLM Proxy the best approach?
+7. modularity/future proofing. 
+8. future addition of OCC. /home/jared/Desktop/memory-system/repomix-output-MaxDevv-Un-LOCC.xml so keep that in mind
+9. will be using the token compression/api cost reduction features of LiteLLM (Redis Cache, 
+10. eventually will use auto-router in LiteLLM
+11. will eventually create custom models via logic pipes and weights by blending multiple LLM's
+12. simplification of multi-provider setups
+13. no custom tools. if outside service we use cli just like a human plus it keeps it out of context window. https://litellm-api.up.railway.app/
+14. exploit and maximize the ai gateway 
+
+caching: import Tabs from '@theme/Tabs'; import TabItem from '@theme/TabItem';
+
+# Caching
+
+:::note
+
+For OpenAI/Anthropic Prompt Caching, go [here](../completion/prompt_caching.md)
+
+:::
+
+Cache LLM Responses. LiteLLM's caching system stores and reuses LLM responses to save costs and
+reduce latency. When you make the same request twice, the cached response is returned instead of
+calling the LLM API again.
+
+### Supported Caches
+
+- In Memory Cache
+- Disk Cache
+- Redis Cache
+- Qdrant Semantic Cache
+- Redis Semantic Cache
+- S3 Bucket Cache
+- GCS Bucket Cache
+
+## Virtual Key Authentication Cache (Redis)
+
+When the proxy verifies a **virtual key** (customer API key), results are cached so the database is not queried on every request. By default that cache lives **only in each worker process**âso after a deploy, new pods or extra Uvicorn workers each warm their own cache and can trigger more DB reads until warmed.
+
+Set `litellm_settings.enable_redis_auth_cache: true` to mirror virtual-key auth data into **the same Redis instance** configured under `litellm_settings.cache` / `cache_params`. Workers and replicas then share cached auth entries across the cluster.
+
+**Requirements**
+
+- `litellm_settings.cache` must be **`true`** (Redis for the proxy is initialized during cache setup). See [All settings](./config_settings).
+- `cache_params.type` must be **`redis`** (or Redis Cluster, per your cache config); the auth cache attaches to that Redis client. See [supported `cache_params`](#supported-cache_params-on-proxy-configyaml).
+- Optionally set **`general_settings.user_api_key_cache_ttl`** (seconds): TTL applies to both the in-memory and Redis tiers when Redis auth caching is enabled, so stale keys expire consistently.
+
+Example:
+
+```yaml
+litellm_settings:
+  cache: true
+  enable_redis_auth_cache: true
+  cache_params:
+    type: redis
+    host: os.environ/REDIS_HOST
+    port: 6379
+
+general_settings:
+  user_api_key_cache_ttl: 300 # optional; seconds
+```
+
+:::tip
+
+Startup logs distinguish the two modes: with `enable_redis_auth_cache: true`, you should see a message that virtual-key lookups are shared across workers.
+
+:::
+
+## Quick Start
+
+<Tabs>
+
+<TabItem value="redis" label="redis cache">
+
+Caching can be enabled by adding the `cache` key in the `config.yaml`
+
+#### Step 1: Add `cache` to the config.yaml
+
+```yaml
+model_list:
+  - model_name: gpt-3.5-turbo
+    litellm_params:
+      model: gpt-3.5-turbo
+  - model_name: text-embedding-ada-002
+    litellm_params:
+      model: text-embedding-ada-002
+
+litellm_settings:
+  set_verbose: True
+  cache: True # set cache responses to True, litellm defaults to using a redis cache
+```
+
+#### [OPTIONAL] Step 1.5: Add redis namespaces, default ttl
+
+#### Namespace
+
+If you want to create some folder for your keys, you can set a namespace, like this:
+
+```yaml
+litellm_settings:
+  cache: true
+  cache_params: # set cache params for redis
+    type: redis
+    namespace: "litellm.caching.caching"
+```
+
+and keys will be stored like:
+
+```
+litellm.caching.caching:<hash>
+```
+
+#### Redis Cluster
+
+<Tabs>
+
+<TabItem value="redis-cluster-config" label="Set on config.yaml">
+
+```yaml
+model_list:
+  - model_name: "*"
+    litellm_params:
+      model: "*"
+
+litellm_settings:
+  cache: True
+  cache_params:
+    type: redis
+    redis_startup_nodes: [{ "host": "127.0.0.1", "port": "7001" }]
+```
+
+</TabItem>
+
+<TabItem value="redis-env" label="Set on .env">
+
+You can configure redis cluster in your .env by setting `REDIS_CLUSTER_NODES` in your .env
+
+**Example `REDIS_CLUSTER_NODES`** value
+
+```
+REDIS_CLUSTER_NODES = "[{"host": "127.0.0.1", "port": "7001"}, {"host": "127.0.0.1", "port": "7003"}, {"host": "127.0.0.1", "port": "7004"}, {"host": "127.0.0.1", "port": "7005"}, {"host": "127.0.0.1", "port": "7006"}, {"host": "127.0.0.1", "port": "7007"}]"
+```
+
+:::note
+
+Example python script for setting redis cluster nodes in .env:
+
+```python
+# List of startup nodes
+startup_nodes = [
+    {"host": "127.0.0.1", "port": "7001"},
+    {"host": "127.0.0.1", "port": "7003"},
+    {"host": "127.0.0.1", "port": "7004"},
+    {"host": "127.0.0.1", "port": "7005"},
+    {"host": "127.0.0.1", "port": "7006"},
+    {"host": "127.0.0.1", "port": "7007"},
+]
+
+# set startup nodes in environment variables
+os.environ["REDIS_CLUSTER_NODES"] = json.dumps(startup_nodes)
+print("REDIS_CLUSTER_NODES", os.environ["REDIS_CLUSTER_NODES"])
+```
+
+:::
+
+</TabItem>
+
+</Tabs>
+
+#### Redis Sentinel
+
+<Tabs>
+
+<TabItem value="redis-sentinel-config" label="Set on config.yaml">
+
+```yaml
+model_list:
+  - model_name: "*"
+    litellm_params:
+      model: "*"
+
+litellm_settings:
+  cache: true
+  cache_params:
+    type: "redis"
+    service_name: "mymaster"
+    sentinel_nodes: [["localhost", 26379]]
+    sentinel_password: "password" # [OPTIONAL]
+```
+
+</TabItem>
+
+<TabItem value="redis-env" label="Set on .env">
+
+You can configure redis sentinel in your .env by setting `REDIS_SENTINEL_NODES` in your .env
+
+**Example `REDIS_SENTINEL_NODES`** value
+
+```env
+REDIS_SENTINEL_NODES='[["localhost", 26379]]'
+REDIS_SERVICE_NAME = "mymaster"
+REDIS_SENTINEL_PASSWORD = "password"
+```
+
+:::note
+
+Example python script for setting redis cluster nodes in .env:
+
+```python
+# List of startup nodes
+sentinel_nodes = [["localhost", 26379]]
+
+# set startup nodes in environment variables
+os.environ["REDIS_SENTINEL_NODES"] = json.dumps(sentinel_nodes)
+print("REDIS_SENTINEL_NODES", os.environ["REDIS_SENTINEL_NODES"])
+```
+
+:::
+
+</TabItem>
+
+</Tabs>
+
+#### TTL
+
+```yaml
+litellm_settings:
+  cache: true
+  cache_params: # set cache params for redis
+    type: redis
+    ttl: 600 # will be cached on redis for 600s
+    # default_in_memory_ttl: Optional[float], default is None. time in seconds.
+    # default_in_redis_ttl: Optional[float], default is None. time in seconds.
+```
+
+#### SSL
+
+just set `REDIS_SSL="True"` in your .env, and LiteLLM will pick this up.
+
+```env
+REDIS_SSL="True"
+```
+
+For quick testing, you can also use REDIS_URL, eg.:
+
+```
+REDIS_URL="rediss://.."
+```
+
+but we **don't** recommend using REDIS_URL in prod. We've noticed a performance difference between
+using it vs. redis_host, port, etc.
+
+#### GCP IAM Authentication
+
+For GCP Memorystore Redis with IAM authentication, install the required dependency:
+
+:::info[IAM authentication for redis is only supported via GCP and only on Redis Clusters for now.]
+:::
+
+```shell
+uv add google-cloud-iam
+```
+
+<Tabs>
+
+<TabItem value="gcp-iam-config" label="Set on config.yaml">
+
+For Redis Cluster with GCP IAM:
+
+```yaml
+litellm_settings:
+  cache: True
+  cache_params:
+    type: redis
+    redis_startup_nodes:
+      [{ "host": "10.128.0.2", "port": 6379 }, { "host": "10.128.0.2", "port": 11008 }]
+    gcp_service_account: "projects/-/serviceAccounts/your-sa@project.iam.gserviceaccount.com"
+    ssl: true
+    ssl_cert_reqs: null
+    ssl_check_hostname: false
+```
+
+</TabItem>
+
+<TabItem value="gcp-iam-env" label="Set on .env">
+
+You can configure GCP IAM Redis authentication in your .env:
+
+For Redis Cluster:
+
+```env
+REDIS_CLUSTER_NODES='[{"host": "10.128.0.2", "port": 6379}, {"host": "10.128.0.2", "port": 11008}]'
+REDIS_GCP_SERVICE_ACCOUNT="projects/-/serviceAccounts/your-sa@project.iam.gserviceaccount.com"
+REDIS_GCP_SSL_CA_CERTS="./server-ca.pem"
+REDIS_SSL="True"
+REDIS_SSL_CERT_REQS="None"
+REDIS_SSL_CHECK_HOSTNAME="False"
+```
+
+**GCP Authentication Setup**
+
+Make sure your GCP credentials are configured:
+
+```shell
+# Option 1: Service account key file
+export GOOGLE_APPLICATION_CREDENTIALS="/path/to/service-account-key.json"
+
+# Option 2: If running on GCP compute instance with service account attached
+# No additional setup needed
+```
+
+</TabItem>
+
+</Tabs> 
+#### Step 2: Add Redis Credentials to .env
+Set either `REDIS_URL` or the `REDIS_HOST` in your os environment, to enable caching.
+
+  ```shell
+  REDIS_URL = ""        # REDIS_URL='redis://username:password@hostname:port/database'
+  ## OR ## 
+  REDIS_HOST = ""       # REDIS_HOST='redis-18841.c274.us-east-1-3.ec2.cloud.redislabs.com'
+  REDIS_PORT = ""       # REDIS_PORT='18841'
+  REDIS_PASSWORD = ""   # REDIS_PASSWORD='liteLlmIsAmazing'
+  REDIS_USERNAME = ""   # REDIS_USERNAME='my-redis-username' [OPTIONAL] if your redis server requires a username
+  REDIS_SSL = "True"    # REDIS_SSL='True' to enable SSL by default is False
+  ```
+
+**Additional kwargs**  
+:::info
+Use `REDIS_*` environment variables to configure all Redis client library parameters. This is the suggested mechanism for toggling Redis settings as it automatically maps environment variables to Redis client kwargs.
+:::
+
+You can pass in any additional redis.Redis arg, by storing the variable + value in your os
+environment, like this:
+
+```shell
+REDIS_<redis-kwarg-name> = ""
+```
+
+For example:
+```shell
+REDIS_SSL = "True"
+REDIS_SSL_CERT_REQS = "None" 
+REDIS_CONNECTION_POOL_KWARGS = '{"max_connections": 20}'
+```
+
+:::warning
+**Note**: For non-string Redis parameters (like integers, booleans, or complex objects), avoid using `REDIS_*` environment variables as they may fail during Redis client initialization. Instead, use `cache_kwargs` in your router configuration for such parameters.
+:::
+
+[**See how it's read from the environment**](https://github.com/BerriAI/litellm/blob/4d7ff1b33b9991dcf38d821266290631d9bcd2dd/litellm/_redis.py#L40)
+
+#### Step 3: Run proxy with config
+
+```shell
+$ litellm --config /path/to/config.yaml
+```
+
+</TabItem>
+
+<TabItem value="qdrant-semantic" label="Qdrant Semantic cache">
+
+Caching can be enabled by adding the `cache` key in the `config.yaml`
+
+#### Step 1: Add `cache` to the config.yaml
+
+```yaml
+model_list:
+  - model_name: fake-openai-endpoint
+    litellm_params:
+      model: openai/fake
+      api_key: fake-key
+      api_base: https://exampleopenaiendpoint-production.up.railway.app/
+  - model_name: openai-embedding
+    litellm_params:
+      model: openai/text-embedding-3-small
+      api_key: os.environ/OPENAI_API_KEY
+
+litellm_settings:
+  set_verbose: True
+  cache: True # set cache responses to True, litellm defaults to using a redis cache
+  cache_params:
+    type: qdrant-semantic
+    qdrant_semantic_cache_embedding_model: openai-embedding # the model should be defined on the model_list
+    qdrant_collection_name: test_collection
+    qdrant_quantization_config: binary
+    qdrant_semantic_cache_vector_size: 1536 # vector size must match embedding model dimensionality
+    similarity_threshold: 0.8 # similarity threshold for semantic cache
+```
+
+#### Step 2: Add Qdrant Credentials to your .env
+
+```shell
+QDRANT_API_KEY = "16rJUMBRx*************"
+QDRANT_API_BASE = "https://5392d382-45*********.cloud.qdrant.io"
+```
+
+#### Step 3: Run proxy with config
+
+```shell
+$ litellm --config /path/to/config.yaml
+```
+
+#### Step 4. Test it
+
+```shell
+curl -i http://localhost:4000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer sk-1234" \
+  -d '{
+    "model": "fake-openai-endpoint",
+    "messages": [
+      {"role": "user", "content": "Hello"}
+    ]
+  }'
+```
+
+**Expect to see `x-litellm-semantic-similarity` in the response headers when semantic caching is
+one**
+
+</TabItem>
+
+<TabItem value="s3" label="s3 cache">
+
+#### Step 1: Add `cache` to the config.yaml
+
+```yaml
+model_list:
+  - model_name: gpt-3.5-turbo
+    litellm_params:
+      model: gpt-3.5-turbo
+  - model_name: text-embedding-ada-002
+    litellm_params:
+      model: text-embedding-ada-002
+
+litellm_settings:
+  set_verbose: True
+  cache: True # set cache responses to True
+  cache_params: # set cache params for s3
+    type: s3
+    s3_bucket_name: cache-bucket-litellm # AWS Bucket Name for S3
+    s3_region_name: us-west-2 # AWS Region Name for S3
+    s3_aws_access_key_id: os.environ/AWS_ACCESS_KEY_ID # us os.environ/<variable name> to pass environment variables. This is AWS Access Key ID for S3
+    s3_aws_secret_access_key: os.environ/AWS_SECRET_ACCESS_KEY # AWS Secret Access Key for S3
+    s3_endpoint_url: https://s3.amazonaws.com # [OPTIONAL] S3 endpoint URL, if you want to use Backblaze/cloudflare s3 buckets
+```
+
+#### Step 2: Run proxy with config
+
+```shell
+$ litellm --config /path/to/config.yaml
+```
+
+</TabItem>
+
+<TabItem value="gcs" label="gcs cache">
+
+#### Step 1: Add `cache` to the config.yaml
+
+```yaml
+model_list:
+  - model_name: gpt-3.5-turbo
+    litellm_params:
+      model: gpt-3.5-turbo
+  - model_name: text-embedding-ada-002
+    litellm_params:
+      model: text-embedding-ada-002
+
+litellm_settings:
+  set_verbose: True
+  cache: True # set cache responses to True
+  cache_params: # set cache params for gcs
+    type: gcs
+    gcs_bucket_name: cache-bucket-litellm # GCS Bucket Name for caching
+    gcs_path_service_account: os.environ/GCS_PATH_SERVICE_ACCOUNT # use os.environ/<variable name> to pass environment variables. This is the path to your GCS service account JSON file
+    gcs_path: cache/ # [OPTIONAL] GCS path prefix for cache objects
+```
+
+#### Step 2: Add GCS Credentials to .env
+
+Set the GCS environment variables in your .env file:
+
+```shell
+GCS_BUCKET_NAME="your-gcs-bucket-name"
+GCS_PATH_SERVICE_ACCOUNT="/path/to/service-account.json"
+```
+
+#### Step 3: Run proxy with config
+
+```shell
+$ litellm --config /path/to/config.yaml
+```
+
+</TabItem>
+
+<TabItem value="redis-sem" label="redis semantic cache">
+
+Caching can be enabled by adding the `cache` key in the `config.yaml`
+
+#### Step 1: Add `cache` to the config.yaml
+
+```yaml
+model_list:
+  - model_name: gpt-3.5-turbo
+    litellm_params:
+      model: gpt-3.5-turbo
+  - model_name: azure-embedding-model
+    litellm_params:
+      model: azure/azure-embedding-model
+      api_base: os.environ/AZURE_API_BASE
+      api_key: os.environ/AZURE_API_KEY
+      api_version: "2023-07-01-preview"
+
+litellm_settings:
+  set_verbose: True
+  cache: True # set cache responses to True
+  cache_params:
+    type: "redis-semantic"
+    similarity_threshold: 0.8 # similarity threshold for semantic cache
+    redis_semantic_cache_embedding_model: azure-embedding-model # set this to a model_name set in model_list
+```
+
+#### Step 2: Add Redis Credentials to .env
+
+Set either `REDIS_URL` or the `REDIS_HOST` in your os environment, to enable caching.
+
+```shell
+REDIS_URL = ""        # REDIS_URL='redis://username:password@hostname:port/database'
+## OR ##
+REDIS_HOST = ""       # REDIS_HOST='redis-18841.c274.us-east-1-3.ec2.cloud.redislabs.com'
+REDIS_PORT = ""       # REDIS_PORT='18841'
+REDIS_PASSWORD = ""   # REDIS_PASSWORD='liteLlmIsAmazing'
+```
+
+**Additional kwargs**  
+You can pass in any additional redis.Redis arg, by storing the variable + value in your os
+environment, like this:
+
+```shell
+REDIS_<redis-kwarg-name> = ""
+```
+
+#### Step 3: Run proxy with config
+
+```shell
+$ litellm --config /path/to/config.yaml
+```
+
+</TabItem>
+
+<TabItem value="local" label="In Memory Cache">
+
+#### Step 1: Add `cache` to the config.yaml
+
+```yaml
+litellm_settings:
+  cache: True
+  cache_params:
+    type: local
+```
+
+#### Step 2: Run proxy with config
+
+```shell
+$ litellm --config /path/to/config.yaml
+```
+
+</TabItem>
+
+<TabItem value="disk" label="Disk Cache">
+
+#### Step 1: Add `cache` to the config.yaml
+
+```yaml
+litellm_settings:
+  cache: True
+  cache_params:
+    type: disk
+    disk_cache_dir: /tmp/litellm-cache # OPTIONAL, default to ./.litellm_cache
+```
+
+#### Step 2: Run proxy with config
+
+```shell
+$ litellm --config /path/to/config.yaml
+```
+
+</TabItem>
+
+</Tabs>
+
+## Usage
+
+### Basic
+
+<Tabs>
+<TabItem value="chat_completions" label="/chat/completions">
+
+Send the same request twice:
+
+```shell
+curl http://0.0.0.0:4000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+     "model": "gpt-3.5-turbo",
+     "messages": [{"role": "user", "content": "write a poem about litellm!"}],
+     "temperature": 0.7
+   }'
+
+curl http://0.0.0.0:4000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+     "model": "gpt-3.5-turbo",
+     "messages": [{"role": "user", "content": "write a poem about litellm!"}],
+     "temperature": 0.7
+   }'
+```
+
+</TabItem>
+<TabItem value="embeddings" label="/embeddings">
+
+Send the same request twice:
+
+```shell
+curl --location 'http://0.0.0.0:4000/embeddings' \
+  --header 'Content-Type: application/json' \
+  --data ' {
+  "model": "text-embedding-ada-002",
+  "input": ["write a litellm poem"]
+  }'
+
+curl --location 'http://0.0.0.0:4000/embeddings' \
+  --header 'Content-Type: application/json' \
+  --data ' {
+  "model": "text-embedding-ada-002",
+  "input": ["write a litellm poem"]
+  }'
+```
+
+</TabItem>
+</Tabs>
+
+### Dynamic Cache Controls
+
+| Parameter   | Type             | Description                                                                       |
+| ----------- | ---------------- | --------------------------------------------------------------------------------- |
+| `ttl`       | _Optional(int)_  | Will cache the response for the user-defined amount of time (in seconds)          |
+| `s-maxage`  | _Optional(int)_  | Will only accept cached responses that are within user-defined range (in seconds) |
+| `no-cache`  | _Optional(bool)_ | Will not store the response in cache.                                             |
+| `no-store`  | _Optional(bool)_ | Will not cache the response                                                       |
+| `namespace` | _Optional(str)_  | Will cache the response under a user-defined namespace                            |
+
+Each cache parameter can be controlled on a per-request basis. Here are examples for each parameter:
+
+### `ttl`
+
+Set how long (in seconds) to cache a response.
+
+<Tabs>
+<TabItem value="openai" label="OpenAI Python SDK">
+
+```python
+from openai import OpenAI
+
+client = OpenAI(
+    api_key="your-api-key",
+    base_url="http://0.0.0.0:4000"
+)
+
+chat_completion = client.chat.completions.create(
+    messages=[{"role": "user", "content": "Hello"}],
+    model="gpt-3.5-turbo",
+    extra_body={
+        "cache": {
+            "ttl": 300  # Cache response for 5 minutes
+        }
+    }
+)
+```
+
+</TabItem>
+
+<TabItem value="curl" label="curl">
+
+```shell
+curl http://localhost:4000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer sk-1234" \
+  -d '{
+    "model": "gpt-3.5-turbo",
+    "cache": {"ttl": 300},
+    "messages": [
+      {"role": "user", "content": "Hello"}
+    ]
+  }'
+```
+
+</TabItem>
+</Tabs>
+
+### `s-maxage`
+
+Only accept cached responses that are within the specified age (in seconds).
+
+<Tabs>
+<TabItem value="openai" label="OpenAI Python SDK">
+
+```python
+from openai import OpenAI
+
+client = OpenAI(
+    api_key="your-api-key",
+    base_url="http://0.0.0.0:4000"
+)
+
+chat_completion = client.chat.completions.create(
+    messages=[{"role": "user", "content": "Hello"}],
+    model="gpt-3.5-turbo",
+    extra_body={
+        "cache": {
+            "s-maxage": 600  # Only use cache if less than 10 minutes old
+        }
+    }
+)
+```
+
+</TabItem>
+
+<TabItem value="curl" label="curl">
+
+```shell
+curl http://localhost:4000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer sk-1234" \
+  -d '{
+    "model": "gpt-3.5-turbo",
+    "cache": {"s-maxage": 600},
+    "messages": [
+      {"role": "user", "content": "Hello"}
+    ]
+  }'
+```
+
+</TabItem>
+</Tabs>
+
+### `no-cache`
+
+Force a fresh response, bypassing the cache.
+
+<Tabs>
+<TabItem value="openai" label="OpenAI Python SDK">
+
+```python
+from openai import OpenAI
+
+client = OpenAI(
+    api_key="your-api-key",
+    base_url="http://0.0.0.0:4000"
+)
+
+chat_completion = client.chat.completions.create(
+    messages=[{"role": "user", "content": "Hello"}],
+    model="gpt-3.5-turbo",
+    extra_body={
+        "cache": {
+            "no-cache": True  # Skip cache check, get fresh response
+        }
+    }
+)
+```
+
+</TabItem>
+
+<TabItem value="curl" label="curl">
+
+```shell
+curl http://localhost:4000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer sk-1234" \
+  -d '{
+    "model": "gpt-3.5-turbo",
+    "cache": {"no-cache": true},
+    "messages": [
+      {"role": "user", "content": "Hello"}
+    ]
+  }'
+```
+
+</TabItem>
+</Tabs>
+
+### `no-store`
+
+Will not store the response in cache.
+
+<Tabs>
+<TabItem value="openai" label="OpenAI Python SDK">
+
+```python
+from openai import OpenAI
+
+client = OpenAI(
+    api_key="your-api-key",
+    base_url="http://0.0.0.0:4000"
+)
+
+chat_completion = client.chat.completions.create(
+    messages=[{"role": "user", "content": "Hello"}],
+    model="gpt-3.5-turbo",
+    extra_body={
+        "cache": {
+            "no-store": True  # Don't cache this response
+        }
+    }
+)
+```
+
+</TabItem>
+
+<TabItem value="curl" label="curl">
+
+```shell
+curl http://localhost:4000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer sk-1234" \
+  -d '{
+    "model": "gpt-3.5-turbo",
+    "cache": {"no-store": true},
+    "messages": [
+      {"role": "user", "content": "Hello"}
+    ]
+  }'
+```
+
+</TabItem>
+</Tabs>
+
+### `namespace`
+
+Store the response under a specific cache namespace.
+
+<Tabs>
+<TabItem value="openai" label="OpenAI Python SDK">
+
+```python
+from openai import OpenAI
+
+client = OpenAI(
+    api_key="your-api-key",
+    base_url="http://0.0.0.0:4000"
+)
+
+chat_completion = client.chat.completions.create(
+    messages=[{"role": "user", "content": "Hello"}],
+    model="gpt-3.5-turbo",
+    extra_body={
+        "cache": {
+            "namespace": "my-custom-namespace"  # Store in custom namespace
+        }
+    }
+)
+```
+
+</TabItem>
+
+<TabItem value="curl" label="curl">
+
+```shell
+curl http://localhost:4000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer sk-1234" \
+  -d '{
+    "model": "gpt-3.5-turbo",
+    "cache": {"namespace": "my-custom-namespace"},
+    "messages": [
+      {"role": "user", "content": "Hello"}
+    ]
+  }'
+```
+
+</TabItem>
+</Tabs>
+
+## Set cache for proxy, but not on the actual llm api call
+
+Use this if you just want to enable features like rate limiting, and loadbalancing across multiple
+instances.
+
+Set `supported_call_types: []` to disable caching on the actual api call.
+
+```yaml
+litellm_settings:
+  cache: True
+  cache_params:
+    type: redis
+    supported_call_types: []
+```
+
+## Debugging Caching - `/cache/ping`
+
+LiteLLM Proxy exposes a `/cache/ping` endpoint to test if the cache is working as expected
+
+**Usage**
+
+```shell
+curl --location 'http://0.0.0.0:4000/cache/ping'  -H "Authorization: Bearer sk-1234"
+```
+
+**Expected Response - when cache healthy**
+
+```shell
+{
+    "status": "healthy",
+    "cache_type": "redis",
+    "ping_response": true,
+    "set_cache_response": "success",
+    "litellm_cache_params": {
+        "supported_call_types": "['completion', 'acompletion', 'embedding', 'aembedding', 'atranscription', 'transcription']",
+        "type": "redis",
+        "namespace": "None"
+    },
+    "redis_cache_params": {
+        "redis_client": "Redis<ConnectionPool<Connection<host=redis-16337.c322.us-east-1-2.ec2.cloud.redislabs.com,port=16337,db=0>>>",
+        "redis_kwargs": "{'url': 'redis://:******@redis-16337.c322.us-east-1-2.ec2.cloud.redislabs.com:16337'}",
+        "async_redis_conn_pool": "BlockingConnectionPool<Connection<host=redis-16337.c322.us-east-1-2.ec2.cloud.redislabs.com,port=16337,db=0>>",
+        "redis_version": "7.2.0"
+    }
+}
+```
+
+## Advanced
+
+### Control Call Types Caching is on for - (`/chat/completion`, `/embeddings`, etc.)
+
+By default, caching is on for all call types. You can control which call types caching is on for by
+setting `supported_call_types` in `cache_params`
+
+**Cache will only be on for the call types specified in `supported_call_types`**
+
+```yaml
+litellm_settings:
+  cache: True
+  cache_params:
+    type: redis
+    supported_call_types:
+      ["acompletion", "atext_completion", "aembedding", "atranscription"]
+      # /chat/completions, /completions, /embeddings, /audio/transcriptions
+```
+
+### Set Cache Params on config.yaml
+
+```yaml
+model_list:
+  - model_name: gpt-3.5-turbo
+    litellm_params:
+      model: gpt-3.5-turbo
+  - model_name: text-embedding-ada-002
+    litellm_params:
+      model: text-embedding-ada-002
+
+litellm_settings:
+  set_verbose: True
+  cache: True # set cache responses to True, litellm defaults to using a redis cache
+  cache_params: # cache_params are optional
+    type: "redis" # The type of cache to initialize. Can be "local", "redis", "s3", or "gcs". Defaults to "local".
+    host: "localhost" # The host address for the Redis cache. Required if type is "redis".
+    port: 6379 # The port number for the Redis cache. Required if type is "redis".
+    password: "your_password" # The password for the Redis cache. Required if type is "redis".
+
+    # Optional configurations
+    supported_call_types:
+      ["acompletion", "atext_completion", "aembedding", "atranscription"]
+      # /chat/completions, /completions, /embeddings, /audio/transcriptions
+```
+
+### Deleting Cache Keys - `/cache/delete`
+
+In order to delete a cache key, send a request to `/cache/delete` with the `keys` you want to delete
+
+Example
+
+```shell
+curl -X POST "http://0.0.0.0:4000/cache/delete" \
+  -H "Authorization: Bearer sk-1234" \
+  -d '{"keys": ["586bf3f3c1bf5aecb55bd9996494d3bbc69eb58397163add6d49537762a7548d", "key2"]}'
+```
+
+```shell
+# {"status":"success"}
+```
+
+#### Viewing Cache Keys from responses
+
+You can view the cache_key in the response headers, on cache hits the cache key is sent as the
+`x-litellm-cache-key` response headers
+
+```shell
+curl -i --location 'http://0.0.0.0:4000/chat/completions' \
+    --header 'Authorization: Bearer sk-1234' \
+    --header 'Content-Type: application/json' \
+    --data '{
+    "model": "gpt-3.5-turbo",
+    "user": "ishan",
+    "messages": [
+        {
+        "role": "user",
+        "content": "what is litellm"
+        }
+    ],
+}'
+```
+
+Response from litellm proxy
+
+```json
+date: Thu, 04 Apr 2024 17:37:21 GMT
+content-type: application/json
+x-litellm-cache-key: 586bf3f3c1bf5aecb55bd9996494d3bbc69eb58397163add6d49537762a7548d
+
+{
+    "id": "chatcmpl-9ALJTzsBlXR9zTxPvzfFFtFbFtG6T",
+    "choices": [
+        {
+            "finish_reason": "stop",
+            "index": 0,
+            "message": {
+                "content": "I'm sorr.."
+                "role": "assistant"
+            }
+        }
+    ],
+    "created": 1712252235,
+}
+
+```
+
+### **Set Caching Default Off - Opt in only **
+
+1. **Set `mode: default_off` for caching**
+
+```yaml
+model_list:
+  - model_name: fake-openai-endpoint
+    litellm_params:
+      model: openai/fake
+      api_key: fake-key
+      api_base: https://exampleopenaiendpoint-production.up.railway.app/
+
+# default off mode
+litellm_settings:
+  set_verbose: True
+  cache: True
+  cache_params:
+    mode: default_off # ð Key change cache is default_off
+```
+
+2. **Opting in to cache when cache is default off**
+
+<Tabs>
+<TabItem value="openai" label="OpenAI Python SDK">
+
+```python
+import os
+from openai import OpenAI
+
+client = OpenAI(api_key=<litellm-api-key>, base_url="http://0.0.0.0:4000")
+
+chat_completion = client.chat.completions.create(
+    messages=[
+        {
+            "role": "user",
+            "content": "Say this is a test",
+        }
+    ],
+    model="gpt-3.5-turbo",
+    extra_body = {        # OpenAI python accepts extra args in extra_body
+        "cache": {"use-cache": True}
+    }
+)
+```
+
+</TabItem>
+
+<TabItem value="curl" label="curl">
+
+```shell
+curl http://localhost:4000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer sk-1234" \
+  -d '{
+    "model": "gpt-3.5-turbo",
+    "cache": {"use-cache": True}
+    "messages": [
+      {"role": "user", "content": "Say this is a test"}
+    ]
+  }'
+```
+
+</TabItem>
+
+</Tabs>
+
+
+## Redis max_connections
+
+You can set the `max_connections` parameter in your `cache_params` for Redis. This is passed directly to the Redis client and controls the maximum number of simultaneous connections in the pool. If you see errors like `No connection available`, try increasing this value:
+
+```yaml
+litellm_settings:
+  cache: true
+  cache_params:
+    type: redis
+    max_connections: 100
+```
+
+## Supported `cache_params` on proxy config.yaml
+
+```yaml
+cache_params:
+  # ttl
+  ttl: Optional[float]
+  default_in_memory_ttl: Optional[float]
+  default_in_redis_ttl: Optional[float]
+  max_connections: Optional[Int]
+
+  # Type of cache (options: "local", "redis", "s3", "gcs")
+  type: s3
+
+  # List of litellm call types to cache for
+  # Options: "completion", "acompletion", "embedding", "aembedding"
+  supported_call_types:
+    ["acompletion", "atext_completion", "aembedding", "atranscription"]
+    # /chat/completions, /completions, /embeddings, /audio/transcriptions
+
+  # Redis cache parameters
+  host: localhost # Redis server hostname or IP address
+  port: "6379" # Redis server port (as a string)
+  password: secret_password # Redis server password
+  namespace: Optional[str] = None,
+
+  # GCP IAM Authentication for Redis
+  gcp_service_account: "projects/-/serviceAccounts/your-sa@project.iam.gserviceaccount.com" # GCP service account for IAM authentication
+  gcp_ssl_ca_certs: "./server-ca.pem" # Path to SSL CA certificate file for GCP Memorystore Redis
+  ssl: true # Enable SSL for secure connections
+  ssl_cert_reqs: null # Set to null for self-signed certificates
+  ssl_check_hostname: false # Set to false for self-signed certificates
+
+  # S3 cache parameters
+  s3_bucket_name: your_s3_bucket_name # Name of the S3 bucket
+  s3_region_name: us-west-2 # AWS region of the S3 bucket
+  s3_api_version: 2006-03-01 # AWS S3 API version
+  s3_use_ssl: true # Use SSL for S3 connections (options: true, false)
+  s3_verify: true # SSL certificate verification for S3 connections (options: true, false)
+  s3_endpoint_url: https://s3.amazonaws.com # S3 endpoint URL
+  s3_aws_access_key_id: your_access_key # AWS Access Key ID for S3
+  s3_aws_secret_access_key: your_secret_key # AWS Secret Access Key for S3
+  s3_aws_session_token: your_session_token # AWS Session Token for temporary credentials
+
+  # GCS cache parameters
+  gcs_bucket_name: your_gcs_bucket_name # Name of the GCS bucket
+  gcs_path_service_account: /path/to/service-account.json # Path to GCS service account JSON file
+  gcs_path: cache/ # [OPTIONAL] GCS path prefix for cache objects
+```
+
+## Provider-Specific Optional Parameters Caching
+
+By default, LiteLLM only includes standard OpenAI parameters in cache keys. However, some providers (like Vertex AI) use additional parameters that affect the output but aren't included in the standard cache key generation.
+
+### Enable Provider-Specific Parameter Caching
+
+Add this setting to your `config.yaml` to include provider-specific optional parameters in cache keys:
+
+```yaml
+litellm_settings:
+  cache: True
+  cache_params:
+    type: "redis"
+  enable_caching_on_provider_specific_optional_params: True  # Include provider-specific params in cache keys
+```
+## Advanced - user api key cache ttl 
+
+Configure how long the in-memory cache stores the key object (prevents db requests)
+
+```yaml
+general_settings:
+  user_api_key_cache_ttl: <your-number> #time in seconds
+```
+
+By default this value is set to 60s.
+
+
+# LiteLLM Proxy CLI
+
+The `litellm-proxy` CLI is a command-line tool for managing your LiteLLM proxy
+server. It provides commands for managing models, credentials, API keys, users,
+and more, as well as making chat and HTTP requests to the proxy server.
+
+| Feature                | What you can do                                 |
+|------------------------|-------------------------------------------------|
+| Models Management      | List, add, update, and delete models            |
+| Credentials Management | Manage provider credentials                     |
+| Keys Management        | Generate, list, and delete API keys             |
+| User Management        | Create, list, and delete users                  |
+| Chat Completions       | Run chat completions                            |
+| HTTP Requests          | Make custom HTTP requests to the proxy server   |
+
+## Quick Start
+
+1. **Install the CLI**
+
+   If you have [uv](https://github.com/astral-sh/uv) installed, you can try this:
+
+   ```shell
+   uv tool install 'litellm[proxy]'
+   ```
+
+   If that works, you'll see something like this:
+
+   ```shell
+   ...
+   Installed 2 executables: litellm, litellm-proxy
+   ```
+
+   and now you can use the tool by just typing `litellm-proxy` in your terminal:
+
+   ```shell
+   litellm-proxy
+   ```
+
+2. **Set up environment variables**
+
+   ```bash
+   export LITELLM_PROXY_URL=http://localhost:4000
+   export LITELLM_PROXY_API_KEY=sk-your-key
+   ```
+
+   *(Replace with your actual proxy URL and API key)*
+
+3. **Make your first request (list models)**
+
+   ```bash
+   litellm-proxy models list
+   ```
+
+   If the CLI is set up correctly, you should see a list of available models or a table output.
+
+4. **Troubleshooting**
+
+   - If you see an error, check your environment variables and proxy server status.
+
+## Authentication using CLI
+
+You can use the CLI to authenticate to the LiteLLM Gateway. This is great if you're trying to give a large number of developers self-serve access to the LiteLLM Gateway.
+
+:::info
+
+For an indepth guide, see [CLI Authentication](./cli_sso).
+
+:::
+
+### Prerequisites
+
+:::warning[Beta Feature - Required Environment Variable]
+
+CLI SSO Authentication is currently in beta. You must set this environment variable **when starting up your LiteLLM Proxy**:
+
+```bash
+export EXPERIMENTAL_UI_LOGIN="True"
+litellm --config config.yaml
+```
+
+Or add it to your proxy startup command:
+
+```bash
+EXPERIMENTAL_UI_LOGIN="True" litellm --config config.yaml
+```
+
+:::
+
+### Steps
+
+1. **Set up the proxy URL**
+
+   ```bash
+   export LITELLM_PROXY_URL=http://localhost:4000
+   ```
+
+   *(Replace with your actual proxy URL)*
+
+2. **Login**
+
+   ```bash
+   litellm-proxy login
+   ```
+
+   This will open a browser window to authenticate. If you have connected LiteLLM Proxy to your SSO provider, you can login with your SSO credentials. Once logged in, you can use the CLI to make requests to the LiteLLM Gateway.
+
+3. **Test your authentication**
+
+   ```bash
+   litellm-proxy models list
+   ```
+
+   This will list all the models available to you.
+
+## Main Commands
+
+### Models Management
+
+- List, add, update, get, and delete models on the proxy.
+- Example:
+
+  ```bash
+  litellm-proxy models list
+  litellm-proxy models add gpt-4 \
+    --param api_key=sk-123 \
+    --param max_tokens=2048
+  litellm-proxy models update <model-id> -p temperature=0.7
+  litellm-proxy models delete <model-id>
+  ```
+
+  [API used (OpenAPI)](https://litellm-api.up.railway.app/#/model%20management)
+
+### Credentials Management
+
+- List, create, get, and delete credentials for LLM providers.
+- Example:
+
+  ```bash
+  litellm-proxy credentials list
+  litellm-proxy credentials create azure-prod \
+    --info='{"custom_llm_provider": "azure"}' \
+    --values='{"api_key": "sk-123", "api_base": "https://prod.azure.openai.com"}'
+  litellm-proxy credentials get azure-cred
+  litellm-proxy credentials delete azure-cred
+  ```
+
+  [API used (OpenAPI)](https://litellm-api.up.railway.app/#/credential%20management)
+
+### Keys Management
+
+- List, generate, get info, and delete API keys.
+- Example:
+
+  ```bash
+  litellm-proxy keys list
+  litellm-proxy keys generate \
+    --models=gpt-4 \
+    --spend=100 \
+    --duration=24h \
+    --key-alias=my-key
+  litellm-proxy keys info --key sk-key1
+  litellm-proxy keys delete --keys sk-key1,sk-key2 --key-aliases alias1,alias2
+  ```
+
+  [API used (OpenAPI)](https://litellm-api.up.railway.app/#/key%20management)
+
+### User Management
+
+- List, create, get info, and delete users.
+- Example:
+
+  ```bash
+  litellm-proxy users list
+  litellm-proxy users create \
+    --email=user@example.com \
+    --role=internal_user \
+    --alias="Alice" \
+    --team=team1 \
+    --max-budget=100.0
+  litellm-proxy users get --id <user-id>
+  litellm-proxy users delete <user-id>
+  ```
+
+  [API used (OpenAPI)](https://litellm-api.up.railway.app/#/Internal%20User%20management)
+
+### Chat Completions
+
+- Ask for chat completions from the proxy server.
+- Example:
+
+  ```bash
+  litellm-proxy chat completions gpt-4 -m "user:Hello, how are you?"
+  ```
+
+  [API used (OpenAPI)](https://litellm-api.up.railway.app/#/chat%2Fcompletions)
+
+### General HTTP Requests
+
+- Make direct HTTP requests to the proxy server.
+- Example:
+
+  ```bash
+  litellm-proxy http request \
+    POST /chat/completions \
+    --json '{"model": "gpt-4", "messages": [{"role": "user", "content": "Hello"}]}'
+  ```
+
+  [All APIs (OpenAPI)](https://litellm-api.up.railway.app/#/)
+
+## Environment Variables
+
+- `LITELLM_PROXY_URL`: Base URL of the proxy server
+- `LITELLM_PROXY_API_KEY`: API key for authentication
+
+## Examples
+
+1. **List all models:**
+
+   ```bash
+   litellm-proxy models list
+   ```
+
+2. **Add a new model:**
+
+   ```bash
+   litellm-proxy models add gpt-4 \
+     --param api_key=sk-123 \
+     --param max_tokens=2048
+   ```
+
+3. **Create a credential:**
+
+   ```bash
+   litellm-proxy credentials create azure-prod \
+     --info='{"custom_llm_provider": "azure"}' \
+     --values='{"api_key": "sk-123", "api_base": "https://prod.azure.openai.com"}'
+   ```
+
+4. **Generate an API key:**
+
+   ```bash
+   litellm-proxy keys generate \
+     --models=gpt-4 \
+     --spend=100 \
+     --duration=24h \
+     --key-alias=my-key
+   ```
+
+5. **Chat completion:**
+
+   ```bash
+   litellm-proxy chat completions gpt-4 \
+     -m "user:Write a story"
+   ```
+
+6. **Custom HTTP request:**
+
+   ```bash
+   litellm-proxy http request \
+     POST /chat/completions \
+     --json '{"model": "gpt-4", "messages": [{"role": "user", "content": "Hello"}]}'
+   ```
+
+## Error Handling
+
+The CLI will display error messages for:
+
+- Server not accessible
+- Authentication failures
+- Invalid parameters or JSON
+- Nonexistent models/credentials
+- Any other operation failures
+
+Use the `--debug` flag for detailed debugging output.
+
+For full command reference and advanced usage, see the [CLI README](https://github.com/BerriAI/litellm/blob/main/litellm/proxy/client/cli/README.md).
+
+
+
+what if we just use LiteLLM Proxy Memory Service (with PostgreSQL) as our subconcious automatic memory layer as the universal source of truth across sessions, across agents, across "teams" .... "teams" could be different workspaces. one for landscape architecture work, one for freelance work, one for coding space, one for research, etc?? or is this a bad idea? what if we just use AGENTS.md plus Skills which are deeply automatic within Pi with LiteLLM memory for everythign else? maybe have a scratchpad per project folder? also we use git? what would be the best way?
+
+import Tabs from '@theme/Tabs';
+import TabItem from '@theme/TabItem';
+
+# /memory
+
+CRUD endpoints for storing and retrieving user/team-scoped memory entries on the LiteLLM proxy. Use these to persist conversation context, agent memory, team playbooks, or any key-value data scoped to users and teams.
+
+## Overview
+
+| Feature | Supported | Notes |
+|---------|-----------|-------|
+| Create memory | â | `POST /v1/memory` |
+| List memories | â | `GET /v1/memory` with optional filtering |
+| Get memory by key | â | `GET /v1/memory/{key}` |
+| Upsert memory | â | `PUT /v1/memory/{key}` |
+| Delete memory | â | `DELETE /v1/memory/{key}` |
+| User-scoped access | â | Entries scoped to `user_id` |
+| Team-scoped access | â | Entries scoped to `team_id` |
+| JSON metadata | â | Arbitrary JSON metadata per entry |
+| Pagination | â | Page-based with configurable page size |
+| Key prefix filtering | â | Redis-style namespace scanning |
+| Audit trail | â | `created_by`, `updated_by` with timestamps |
+| Supported LiteLLM Versions | `v1.83.10+` | |
+
+## Prerequisites
+
+- LiteLLM Proxy running with a **PostgreSQL** database connected
+- Database migrations applied (the `LiteLLM_MemoryTable` is created automatically)
+- Valid API key for authentication
+
+No additional `config.yaml` entries required. Endpoints are available automatically once the proxy starts with a connected database.
+
+## Quick Start
+
+### Create a Memory Entry
+
+<Tabs>
+<TabItem value="curl" label="curl">
+
+```shell title="Create memory"
+curl -X POST "http://localhost:4000/v1/memory" \
+  -H "Authorization: Bearer sk-1234" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "key": "user:123:preferences",
+    "value": "Prefers concise responses. Timezone: PST.",
+    "metadata": {"tags": ["preferences", "user-settings"]}
+  }'
+```
+
+</TabItem>
+<TabItem value="python" label="Python (httpx)">
+
+```python showLineNumbers title="Create memory"
+import httpx
+
+client = httpx.Client(
+    base_url="http://localhost:4000",
+    headers={"Authorization": "Bearer sk-1234"},
+)
+
+response = client.post("/v1/memory", json={
+    "key": "user:123:preferences",
+    "value": "Prefers concise responses. Timezone: PST.",
+    "metadata": {"tags": ["preferences", "user-settings"]},
+})
+print(response.json())
+```
+
+</TabItem>
+</Tabs>
+
+**Response:**
+
+```json
+{
+  "memory_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+  "key": "user:123:preferences",
+  "value": "Prefers concise responses. Timezone: PST.",
+  "metadata": {"tags": ["preferences", "user-settings"]},
+  "user_id": "user-123",
+  "team_id": "team-abc",
+  "created_at": "2025-04-21T12:00:00Z",
+  "created_by": "user-123",
+  "updated_at": "2025-04-21T12:00:00Z",
+  "updated_by": "user-123"
+}
+```
+
+### List Memories
+
+<Tabs>
+<TabItem value="curl" label="curl">
+
+```shell title="List all memories"
+curl "http://localhost:4000/v1/memory" \
+  -H "Authorization: Bearer sk-1234"
+```
+
+```shell title="Filter by key prefix"
+curl "http://localhost:4000/v1/memory?key_prefix=user:123:" \
+  -H "Authorization: Bearer sk-1234"
+```
+
+```shell title="Paginate results"
+curl "http://localhost:4000/v1/memory?page=2&page_size=10" \
+  -H "Authorization: Bearer sk-1234"
+```
+
+</TabItem>
+<TabItem value="python" label="Python (httpx)">
+
+```python showLineNumbers title="List memories"
+# List all
+response = client.get("/v1/memory")
+print(response.json())
+
+# Filter by key prefix
+response = client.get("/v1/memory", params={"key_prefix": "user:123:"})
+print(response.json())
+
+# Paginate
+response = client.get("/v1/memory", params={"page": 2, "page_size": 10})
+print(response.json())
+```
+
+</TabItem>
+</Tabs>
+
+**Response:**
+
+```json
+{
+  "memories": [
+    {
+      "memory_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+      "key": "user:123:preferences",
+      "value": "Prefers concise responses. Timezone: PST.",
+      "metadata": {"tags": ["preferences", "user-settings"]},
+      "user_id": "user-123",
+      "team_id": "team-abc",
+      "created_at": "2025-04-21T12:00:00Z",
+      "created_by": "user-123",
+      "updated_at": "2025-04-21T12:00:00Z",
+      "updated_by": "user-123"
+    }
+  ],
+  "total": 1
+}
+```
+
+### Get a Memory by Key
+
+<Tabs>
+<TabItem value="curl" label="curl">
+
+```shell title="Get memory by key"
+curl "http://localhost:4000/v1/memory/user:123:preferences" \
+  -H "Authorization: Bearer sk-1234"
+```
+
+</TabItem>
+<TabItem value="python" label="Python (httpx)">
+
+```python showLineNumbers title="Get memory by key"
+response = client.get("/v1/memory/user:123:preferences")
+print(response.json())
+```
+
+</TabItem>
+</Tabs>
+
+### Update (Upsert) a Memory
+
+If the key exists, updates it. If not, creates a new entry.
+
+<Tabs>
+<TabItem value="curl" label="curl">
+
+```shell title="Upsert memory"
+curl -X PUT "http://localhost:4000/v1/memory/user:123:preferences" \
+  -H "Authorization: Bearer sk-1234" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "value": "Prefers concise responses. Timezone: EST. Language: English.",
+    "metadata": {"tags": ["preferences", "user-settings"], "version": 2}
+  }'
+```
+
+</TabItem>
+<TabItem value="python" label="Python (httpx)">
+
+```python showLineNumbers title="Upsert memory"
+response = client.put("/v1/memory/user:123:preferences", json={
+    "value": "Prefers concise responses. Timezone: EST. Language: English.",
+    "metadata": {"tags": ["preferences", "user-settings"], "version": 2},
+})
+print(response.json())
+```
+
+</TabItem>
+</Tabs>
+
+### Delete a Memory
+
+<Tabs>
+<TabItem value="curl" label="curl">
+
+```shell title="Delete memory"
+curl -X DELETE "http://localhost:4000/v1/memory/user:123:preferences" \
+  -H "Authorization: Bearer sk-1234"
+```
+
+</TabItem>
+<TabItem value="python" label="Python (httpx)">
+
+```python showLineNumbers title="Delete memory"
+response = client.delete("/v1/memory/user:123:preferences")
+print(response.json())
+```
+
+</TabItem>
+</Tabs>
+
+**Response:**
+
+```json
+{
+  "key": "user:123:preferences",
+  "deleted": true
+}
+```
+
+## API Reference
+
+### POST `/v1/memory`
+
+Create a new memory entry.
+
+**Request Body:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `key` | string | â | Globally unique key. Use namespaced keys (e.g., `user:123:notes`). |
+| `value` | string | â | Memory content. Typically markdown or plain text. |
+| `metadata` | any (JSON) | â | Optional JSON metadata (dicts, lists, scalars). |
+| `user_id` | string | â | Scope to a user. Defaults to caller's `user_id`. Admin-only override. |
+| `team_id` | string | â | Scope to a team. Defaults to caller's `team_id`. Admin-only override. |
+
+**Response:** `201` â Returns the created `LiteLLM_MemoryRow`.
+
+---
+
+### GET `/v1/memory`
+
+List memory entries visible to the caller.
+
+**Query Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `key` | string | â | Filter by exact key match. |
+| `key_prefix` | string | â | Filter by key prefix (e.g., `user:123:`). Takes precedence over `key`. |
+| `page` | int | 1 | Page number (1-indexed). |
+| `page_size` | int | 50 | Items per page (max 500). |
+
+**Response:** `200` â Returns `MemoryListResponse` with `memories` array and `total` count.
+
+---
+
+### GET `/v1/memory/{key}`
+
+Get a single memory entry by key.
+
+**Path Parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `key` | string | The memory key to retrieve. |
+
+**Response:** `200` â Returns the `LiteLLM_MemoryRow`.
+
+---
+
+### PUT `/v1/memory/{key}`
+
+Upsert a memory entry. Creates the entry if the key doesn't exist; updates it if it does.
+
+**Path Parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `key` | string | The memory key to create or update. |
+
+**Request Body:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `value` | string | â (on create) | Memory content. Required when creating, optional when updating. |
+| `metadata` | any (JSON) | â | Updated metadata. Omit to preserve existing value. Set to `null` to clear. |
+| `user_id` | string | â | Only used on create. Admin-only override. |
+| `team_id` | string | â | Only used on create. Admin-only override. |
+
+**Response:** `200` â Returns the created/updated `LiteLLM_MemoryRow`.
+
+---
+
+### DELETE `/v1/memory/{key}`
+
+Delete a memory entry by key.
+
+**Path Parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `key` | string | The memory key to delete. |
+
+**Response:** `200` â Returns `{"key": "...", "deleted": true}`.
+
+## Response Object
+
+All endpoints that return a memory entry use this schema:
+
+```json
+{
+  "memory_id": "string (UUID)",
+  "key": "string",
+  "value": "string",
+  "metadata": "any (JSON) or null",
+  "user_id": "string or null",
+  "team_id": "string or null",
+  "created_at": "datetime",
+  "created_by": "string",
+  "updated_at": "datetime",
+  "updated_by": "string"
+}
+```
+
+## Access Control
+
+Memory entries are scoped by `user_id` and `team_id`, with role-based visibility and write access.
+
+### Visibility (Read)
+
+| Role | Can See |
+|------|---------|
+| **Proxy Admin** | All memory entries |
+| **Regular User** | Entries where `user_id` matches their own OR `team_id` matches their own |
+
+### Write Access (Update / Delete)
+
+| Scenario | Who Can Write |
+|----------|---------------|
+| Entry has `user_id` matching caller | Owner can update/delete |
+| Entry is team-scoped only (no `user_id`) | Team admins and org admins only |
+| Any entry | Proxy admins |
+
+:::info
+
+Team members can **read** team-scoped entries but only **team admins** can modify or delete them. This prevents teammates from overwriting each other's entries.
+
+:::
+
+### Scoping on Create
+
+- `user_id` and `team_id` default to the caller's identity from their API key
+- **Proxy admins** can override `user_id` / `team_id` to create entries for other users or teams
+- Non-admin callers cannot create entries without at least one of `user_id` or `team_id`
+
+## Key Naming Conventions
+
+Keys are globally unique. Use namespaced keys to organize entries:
+
+```
+user:{user_id}:preferences      # User preferences
+user:{user_id}:context          # Conversation context
+team:{team_id}:playbook         # Team playbook
+agent:{agent_id}:memory         # Agent memory
+project:{project_id}:config     # Project configuration
+```
+
+Use `key_prefix` in the list endpoint to scan all entries in a namespace:
+
+```shell
+# Get all entries for a user
+curl "http://localhost:4000/v1/memory?key_prefix=user:123:" \
+  -H "Authorization: Bearer sk-1234"
+```
+
+## Error Codes
+
+| Status Code | Meaning |
+|-------------|---------|
+| `200` | Success (GET, PUT, DELETE) |
+| `201` | Created (POST) |
+| `400` | Invalid input (missing required fields, empty PUT body, orphan row) |
+| `403` | Permission denied (write access violation, scope override by non-admin) |
+| `404` | Key not found or not visible to caller |
+| `409` | Duplicate key on creation |
+| `500` | Internal server error (database issues) |
+
