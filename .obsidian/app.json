@@ -1,0 +1,11 @@
+{
+  "promptDelete": false,
+  "alwaysUpdateLinks": true,
+  "newFileLocation": "folder",
+  "newFileFolderPath": "memories",
+  "attachmentFolderPath": "memories/_assets",
+  "useMarkdownLinks": true,
+  "showUnsupportedFiles": true,
+  "showFrontmatter": true,
+  "showLineNumber": false
+}

@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# Obsidian
+.obsidian/workspace.json
+.obsidian/workspace
+
+# Server
+server/.env
+*.db
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Embedding cache (optional)
+memories/_embeddings/
