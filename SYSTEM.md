@@ -1,49 +1,49 @@
 ---
 id: system_instructions
 type: config
-tags: [#core, #system, #instructions]
-synopsis: "Operational system: context hygiene, tool order, git workflow, skills loading"
-links: [[PERSONA.md]], [[USER.md]], [[TODO.md]]
+tags: [#core, #system, #instructions, #phases]
+synopsis: "Operational system: 6-phase architecture, context hygiene, tool order, git workflow"
+links: [[PERSONA.md]], [[USER.md]], [[TODO.md]], [[ARCHITECTURE.md]]
 ---
 
 # SYSTEM.md
 
-## Operational Instructions
+## Architecture Phases
 
-### Context Hygiene
+**Phase 1:** Local Markdown Files (flat, git-backed)
+**Phase 2:** Hybrid Engine (uv + Postgres + Git)
+**Phase 3:** Workspace Hooks (/init-memory, /seed-profile, /cohere)
+**Phase 4:** CNS Resonance (4-phase verification loop)
+**Phase 5:** Knowledge Graphs (Graphify, visual systems)
+**Phase 6:** Security Perimeter (honeypot, forensics)
+
+## Context Hygiene
 - Evict immediately when >20% context window
-- Summary goes to `memories/sessions/YYYY-MM-DD_slug.md`
-- Git commit after every meaningful change
+- Summary → `memories/sessions/YYYY-MM-DD_slug.md`
+- Git commit after every logical change
 
-### Tool Preferences (in order)
-1. `bash` — git/mkdir/rm/mv/file mutations only (<20 lines output)
-2. `read` — only when planning to edit
-3. `edit` — precise file changes
-4. `write` — new files
-5. `ctx_execute` — large output processing
-6. `curl` — external API calls
+## Tool Order (CLI First)
+1. `bash` — mutations only
+2. `ctx_execute` — large output processing
+3. `read` — only when editing
+4. `edit`/`write` — file changes
 
-### Git Workflow
-- Commit after every logical step
-- Format: `type: description`
-- Push to remote after feature complete
+## File Standards
+- All root maps: 50-line hard cap
+- YAML frontmatter required
+- Wiki-links: `[[filename]]`, `[[folder/file]]`
+- AGENTS.md in every subdirectory (except `.agents/`)
 
-### Skill Loading Pattern
-- Skills in `skills/<name>/SKILL.md`
-- Bash commands only (no custom tools)
-- YAML frontmatter required: `---\nname: skill-name\ndescription: trigger\n---`
-
-### SQLite Memory Integration
-- Per-project: `projects/<name>/memory.db`
-- Auto-index on file changes via `sqlmem watch`
-- Search via MCP or curl to LiteLLM proxy
-
-### Memory Structure
+## Memory Structure
 ```
 memories/
-├── people/     # People, profiles
-├── projects/   # Project knowledge  
-├── decisions/  # Technical decisions
-├── concepts/   # Abstract concepts
-└── sessions/   # Session summaries
+├── people/    # Profiles
+├── projects/  # Project knowledge
+├── decisions/ # Technical decisions
+└── sessions/  # End-of-session archives
 ```
+
+## Git Shadow Protocol
+- PostgreSQL → `schema.sql` + `data_state.json`
+- Git tracks text diffs, not binaries
+- Background sync via `rclone crypt`
