@@ -2,33 +2,44 @@
 id: task_ledger
 type: root_map
 tags: [#core, #tasks]
-synopsis: "Active task ledger. Check PLAN.md for full roadmap."
-links: [[PLAN.md]], [[MEMORY.md]]
+synopsis: "Active task ledger. Skills drive everything."
+links: [[JACE_PLAN.md]], [[MEMORY.md]]
 ---
 
 # TODO
 
-## Active — This Session
+## DONE
 
-- [x] Restructure PLAN.md as compaction-proof master plan
-- [x] Rewrite SELF.md with real character (SAE brother energy, equal partner)
-- [x] Rewrite HOMIE.md with explicit complementarity table
-- [x] Create AGENTS.md root + fractal subdirectory AGENTS.md files
-- [ ] Add remote git origin + push to GitHub
-- [ ] Decide on agent's real name (currently "Pi" = placeholder)
+- [x] Create JACE_PLAN.md v3 with Agent Skills foundation
+- [x] Update SELF.md with Jace character + lock
+- [x] Update HOMIE.md with explicit complementarity table
+- [x] Create skills/ directory with 6 core SKILL.md files
+- [x] Add Conversation with Gemini.txt to repo
 
-## Next Session
+## NOW
 
-- [ ] Set up post-commit hook for REPO_MAP.txt generation
-- [ ] Set up pre-commit hook for YAML frontmatter validation
-- [ ] Build /init-memory scaffold script
-- [ ] Build /seed-profile ingestion script
+- [ ] Commit all changes (skills + plan + character updates)
+- [ ] Create remote git repository + push
+- [ ] Build pre-commit hook (YAML frontmatter validation)
+- [ ] Build post-commit hook (REPO_MAP.txt regeneration)
 
-## Deferred
+## NEXT
 
-- [ ] LiteLLM gateway + Postgres Docker (Phase 4)
-- [ ] rclone crypt backup automation (Phase 4)
-- [ ] /cohere resonance loop (Phase 5)
-- [ ] Graphify / knowledge graph integration (Phase 6)
-- [ ] Un-LOCC spatial visualization (Phase 6)
-- [ ] Security isolation layer (Phase 7 — lowest priority)
+- [ ] Create skills/seed-profile/ (ingest Jared profile)
+- [ ] Create skills/memory-link/ (wiki-link maintenance)
+- [ ] Create skills/litellm-query/ (curl wrapper)
+- [ ] Test Agent Skills pattern with session summary
+
+## PHASE 2 (LiteLLM proxy)
+
+- [ ] Test LiteLLM memory K/V via curl
+- [ ] Configure LiteLLM with memory-bank model
+- [ ] Test A2A agent registration
+- [ ] Test MCP tool access
+
+## PHASE 3 (Postgres + Docker)
+
+- [ ] Dockerize Postgres with restart: always
+- [ ] Configure LiteLLM + Postgres connection
+- [ ] Test memory K/V persistence
+- [ ] Implement DB shadow protocol
