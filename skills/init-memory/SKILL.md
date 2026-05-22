@@ -1,44 +1,28 @@
 ---
 name: init-memory
-description: Scaffold a new memory system project directory with root maps, memories/ structure, and Obsidian config.
+description: Initialize memory-system in new project folder with fractal AGENTS.md
 ---
 
-# Init Memory Skill
+# Init Memory Slash Command
 
-Creates a new memory-system style project.
-
-## Structure Created
-
-```
-project-name/
-├── SELF.md      (scaffold - edit personal identity)
-├── HOMIE.md     (scaffold - edit partner profile)  
-├── MEMORY.md    (empty - milestones go here)
-├── PLAN.md      (empty - strategic plan)
-├── TODO.md      (empty - task tracker)
-├── AGENTS.md    (empty - directory index)
-├── .obsidian/
-│   ├── app.json
-│   └── core-plugins.json
-├── memories/
-│   ├── people/.gitkeep
-│   ├── projects/.gitkeep
-│   ├── decisions/.gitkeep
-│   ├── concepts/.gitkeep
-│   └── sessions/.gitkeep
-└── .gitignore   (standard patterns)
-```
-
-## Initialization
-
+## Usage
 ```bash
-mkdir -p project-name/memories/{people,projects,decisions,concepts,sessions}
-touch project-name/memories/*/..gitkeep
+/init-memory
 ```
 
-## Post-scaffold
+## Actions
+1. Create `.agents/` directory with SELF.md, HOMIE.md, SYSTEM.md
+2. Sprout AGENTS.md in all subdirectories
+3. Initialize git repo with hooks
+4. Generate base memory structure
 
-1. Initialize git repo if needed
-2. Create initial commit
-3. Generate REPO_MAP.txt
-4. Ready for customization
+## Script
+```bash
+#!/bin/bash
+echo "Initializing memory-system..."
+mkdir -p .agents memories/{people,projects,decisions,concepts,sessions}
+# Copy template files from skills/init-memory/
+cp -r ~/.pi/agent/skills/memory-system/AGENTS.md .agents/
+git init
+echo "Done."
+```
