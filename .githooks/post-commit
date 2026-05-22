@@ -1,0 +1,22 @@
+#!/bin/bash
+# Post-commit hook: Regenerate REPO_MAP.txt
+
+echo "Regenerating REPO_MAP.txt..."
+
+# Generate repository map
+cat > /home/jared/Desktop/memory-system/REPO_MAP.txt << 'EOF'
+# Repository Map - Auto-generated
+# Last updated: $(date -Iseconds)
+
+## Structure
+$(find . -type f -name "*.md" ! -path "./.git/*" | head -50)
+
+## Skills
+$(ls -1 skills/*/SKILL.md 2>/dev/null | xargs -I{} basename $(dirname {}))
+
+## Recent Commits
+$(git log --oneline -10)
+
+EOF
+
+echo "REPO_MAP.txt updated."

@@ -1,0 +1,29 @@
+#!/bin/bash
+# Pre-commit hook: Validate YAML frontmatter in SKILL.md files
+
+echo "Validating YAML frontmatter..."
+
+for file in $(git diff --cached --name-only --diff-filter=ACM | grep 'SKILL.md$'); do
+    if [ -f "$file" ]; then
+        # Check for YAML frontmatter delimiters
+        if ! head -5 "$file" | grep -q "^---$"; then
+            echo "ERROR: $file missing YAML frontmatter (--- header)"
+            exit 1
+        fi
+        
+        # Check for required fields
+        if ! grep -q "^name:" "$file"; then
+            echo "ERROR: $file missing 'name:' field in frontmatter"
+            exit 1
+        fi
+        
+        if ! grep -q "^description:" "$file"; then
+            echo "ERROR: $file missing 'description:' field in frontmatter"
+            exit 1
+        fi
+        
+        echo "✓ $file"
+    fi
+done
+
+echo "All SKILL.md files validated."
