@@ -196,16 +196,6 @@ async def create_memory(m: MemoryCreate):
     )
 
 
-@app.get("/memories/{mem_id}")
-async def get_memory(mem_id: str):
-    """Find a memory by ID (scans all *.md)."""
-    for fp in MEMORIES.rglob("*.md"):
-        m = _parse_markdown(fp.read_text(encoding="utf-8"), str(fp))
-        if m and m.id == mem_id:
-            return m
-    raise HTTPException(404, f"memory '{mem_id}' not found")
-
-
 @app.get("/memories/search")
 async def search_memories(
     q: str = Query("", description="search query"),
@@ -302,6 +292,16 @@ async def list_memories(
             if len(results) >= limit:
                 break
     return {"results": results, "count": len(results)}
+
+
+@app.get("/memories/{mem_id}")
+async def get_memory(mem_id: str):
+    """Find a memory by ID (scans all *.md)."""
+    for fp in MEMORIES.rglob("*.md"):
+        m = _parse_markdown(fp.read_text(encoding="utf-8"), str(fp))
+        if m and m.id == mem_id:
+            return m
+    raise HTTPException(404, f"memory '{mem_id}' not found")
 
 
 # ── OpenAI-compatible endpoint (for LiteLLM routing) ──────────────

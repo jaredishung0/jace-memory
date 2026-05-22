@@ -1,9 +1,6 @@
 # LiteLLM Proxy Configuration
-# Routes LLM calls + memory-bank through one gateway
-# Start: litellm --config litellm_config.yaml --port 4000
-
-general_settings:
-  database_url: "sqlite:///litellm.db"  # default, no Postgres needed
+# Route: litellm --config litellm_config.yaml --port 4000
+# SQLite by default — no Postgres needed
 
 model_list:
   # ── LLM Providers ────────────────────────────────────────────
