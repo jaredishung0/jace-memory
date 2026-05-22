@@ -1,6 +1,7 @@
 ---
 name: memory-create
 description: Create a new memory markdown file with YAML frontmatter in the memories/ directory. Use when recording decisions, sessions, or project notes that should persist across context resets.
+links: [[SYSTEM.md]], [[TODO.md]], [[memories/]]
 ---
 
 # Memory Create Skill

@@ -1,3 +1,11 @@
+---
+id: system_instructions
+type: config
+tags: [#core, #system, #instructions]
+synopsis: "Operational system: context hygiene, tool order, git workflow, skills loading"
+links: [[PERSONA.md]], [[USER.md]], [[TODO.md]]
+---
+
 # SYSTEM.md
 
 ## Operational Instructions

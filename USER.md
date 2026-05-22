@@ -1,3 +1,11 @@
+---
+id: user_profile
+type: identity
+tags: [#core, #user, #jared]
+synopsis: "Jared profile: landscape arch expert, direct communication, aesthetic authority"
+links: [[PERSONA.md]], [[SYSTEM.md]], [[memories/People/Jared]]
+---
+
 # USER.md
 
 ## Jared — Texas Tech, Landscape Architecture (2012)

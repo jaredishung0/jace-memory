@@ -1,6 +1,7 @@
 ---
 name: memory-search
 description: Search across all memory files using ripgrep. Returns matching files with context snippets.
+links: [[memory-create]], [[SYSTEM.md]]
 ---
 
 # Memory Search Skill
